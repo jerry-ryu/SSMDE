@@ -52,47 +52,74 @@ class Trainer:
         if self.opt.use_stereo:
             self.opt.frame_ids.append("s")
 
-        # self.models["encoder"] = networks.BaseEncoder.build(num_features=self.opt.num_features, model_dim=self.opt.model_dim)
-        # self.models["encoder"] = networks.ResnetEncoderDecoder(num_layers=self.opt.num_layers, num_features=self.opt.num_features, model_dim=self.opt.model_dim)
-        if self.opt.backbone in ["resnet", "resnet_lite"]:
-            self.models["encoder"] = networks.ResnetEncoderDecoder(num_layers=self.opt.num_layers, num_features=self.opt.num_features, model_dim=self.opt.model_dim)
-        elif self.opt.backbone == "resnet18_lite":
-            self.models["encoder"] = networks.LiteResnetEncoderDecoder(model_dim=self.opt.model_dim)
-        elif self.opt.backbone == "eff_b5":
-            self.models["encoder"] = networks.BaseEncoder.build(num_features=self.opt.num_features, model_dim=self.opt.model_dim)
-        else: 
-            self.models["encoder"] = networks.Unet(pretrained=(not self.opt.load_pretrained_model), backbone=self.opt.backbone, in_channels=3, num_classes=self.opt.model_dim, decoder_channels=self.opt.dec_channels)
+        # high encoder
+        self.models["encoder_high"] = networks.Unet(pretrained=(not self.opt.load_pretrained_model), backbone=self.opt.backbone, in_channels=3, num_classes=self.opt.model_dim, decoder_channels=self.opt.dec_channels)
+        # low encoder 
+        self.models["encoder_low"] = networks.Unet(pretrained=(not self.opt.load_pretrained_model), backbone=self.opt.backbone, in_channels=3, num_classes=self.opt.model_dim, decoder_channels=self.opt.dec_channels)
 
         if self.opt.load_pretrained_model:
-            print("-> Loading pretrained encoder from ", self.opt.load_pt_folder)
-            encoder_path = os.path.join(self.opt.load_pt_folder, "encoder.pth")
+            # high encoder load weight
+            print("-> Loading pretrained high encoder from ", self.opt.load_pt_folder_high)
+            encoder_path = os.path.join(self.opt.load_pt_folder_high, "encoder.pth")
             loaded_dict_enc = torch.load(encoder_path, map_location=self.device)
-            filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.models["encoder"].state_dict()}
-            self.models["encoder"].load_state_dict(filtered_dict_enc)
+            filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.models["encoder_high"].state_dict()}
+            self.models["encoder_high"].load_state_dict(filtered_dict_enc)
+            
+            # low encoder load weight
+            print("-> Loading pretrained low encoder from ", self.opt.load_pt_folder_low)
+            encoder_path = os.path.join(self.opt.load_pt_folder_low, "encoder.pth")
+            loaded_dict_enc = torch.load(encoder_path, map_location=self.device)
+            filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.models["encoder_low"].state_dict()}
+            self.models["encoder_low"].load_state_dict(filtered_dict_enc)
 
-        self.models["encoder"] = self.models["encoder"].cuda()
-        self.models["encoder"] = torch.nn.DataParallel(self.models["encoder"]) 
-        # self.models["encoder"].to(self.device)
-        self.parameters_to_train += list(self.models["encoder"].parameters())
+        self.models["encoder_high"] = self.models["encoder_high"].cuda()
+        self.models["encoder_high"] = torch.nn.DataParallel(self.models["encoder_high"]) 
+        for param in self.models["encoder_high"].parameters():
+            param.requires_grad = False
+        
+        self.models["encoder_low"] = self.models["encoder_low"].cuda()
+        self.models["encoder_low"] = torch.nn.DataParallel(self.models["encoder_low"]) 
+        for param in self.models["encoder_low"].parameters():
+            param.requires_grad = False
+            
+        # self.parameters_to_train += list(self.models["encoder"].parameters())
+            
 
-        if self.opt.backbone.endswith("_lite"):
-            self.models["depth"] = networks.Lite_Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size, dim_out=self.opt.dim_out, embedding_dim=self.opt.model_dim, 
+        # high depth
+        self.models["depth_high"] = networks.Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size, dim_out=self.opt.dim_out, embedding_dim=self.opt.model_dim, 
                                                                     query_nums=self.opt.query_nums, num_heads=4, min_val=self.opt.min_depth, max_val=self.opt.max_depth)
-        else:
-            self.models["depth"] = networks.Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size, dim_out=self.opt.dim_out, embedding_dim=self.opt.model_dim, 
+        
+        # lowh depth
+        self.models["depth_low"] = networks.Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size, dim_out=self.opt.dim_out, embedding_dim=self.opt.model_dim, 
                                                                     query_nums=self.opt.query_nums, num_heads=4, min_val=self.opt.min_depth, max_val=self.opt.max_depth)
 
         if self.opt.load_pretrained_model:
-            print("-> Loading pretrained depth decoder from ", self.opt.load_pt_folder)
-            depth_decoder_path = os.path.join(self.opt.load_pt_folder, "depth.pth")
+            # high depth load weight
+            print("-> Loading pretrained high depth decoder from ", self.opt.load_pt_folder_high)
+            depth_decoder_path = os.path.join(self.opt.load_pt_folder_high, "depth.pth")
             loaded_dict_enc = torch.load(depth_decoder_path, map_location=self.device)
-            filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.models["depth"].state_dict()}
-            self.models["depth"].load_state_dict(filtered_dict_enc)
+            filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.models["depth_high"].state_dict()}
+            self.models["depth_high"].load_state_dict(filtered_dict_enc)
+            
+            # low depth load weight
+            print("-> Loading pretrained low depth decoder from ", self.opt.load_pt_folder_low)
+            depth_decoder_path = os.path.join(self.opt.load_pt_folder_low, "depth.pth")
+            loaded_dict_enc = torch.load(depth_decoder_path, map_location=self.device)
+            filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.models["depth_low"].state_dict()}
+            self.models["depth_low"].load_state_dict(filtered_dict_enc)
+            
 
-        self.models["depth"] = self.models["depth"].cuda()
-        self.models["depth"] = torch.nn.DataParallel(self.models["depth"])
-        # self.models["depth"].to(self.device)
-        self.parameters_to_train += list(self.models["depth"].parameters())
+        self.models["depth_high"] = self.models["depth_high"].cuda()
+        self.models["depth_high"] = torch.nn.DataParallel(self.models["depth_high"])
+        for param in self.models["depth_high"].parameters():
+            param.requires_grad = False
+            
+        self.models["depth_low"] = self.models["depth_low"].cuda()
+        self.models["depth_low"] = torch.nn.DataParallel(self.models["depth_low"])
+        for param in self.models["depth_low"].parameters():
+            param.requires_grad = False
+        
+        # self.parameters_to_train += list(self.models["depth"].parameters())
 
 
         self.models["pose"] = networks.PoseCNN(
@@ -105,32 +132,10 @@ class Trainer:
 
         # self.models["pose"].to(self.device)
         self.models["pose"] = self.models["pose"].cuda()
-        # self.models["pose"] = torch.nn.DataParallel(self.models["pose"])
-        if self.opt.diff_lr :
-            print("using diff lr for depth-net and pose-net")
-            self.pose_params = []
-            self.pose_params += list(self.models["pose"].parameters())
-        else :
-            self.parameters_to_train += list(self.models["pose"].parameters())
+        for param in self.models["pose"].parameters():
+            param.requires_grad = False
 
-        # if self.opt.predictive_mask:
-        #     assert self.opt.disable_automasking, \
-        #         "When using predictive_mask, please disable automasking with --disable_automasking"
-
-        #     # Our implementation of the predictive masking baseline has the the same architecture
-        #     # as our depth decoder. We predict a separate mask for each source frame.
-        #     self.models["predictive_mask"] = networks.DepthDecoder(
-        #         self.models["encoder"].num_ch_enc, self.opt.scales,
-        #         num_output_channels=(len(self.opt.frame_ids) - 1))
-        #     self.models["predictive_mask"].to(self.device)
-        #     self.parameters_to_train += list(self.models["predictive_mask"].parameters())
-
-        if self.opt.diff_lr :
-            df_params = [{"params": self.pose_params, "lr": self.opt.learning_rate / 10},
-                      {"params": self.parameters_to_train, "lr": self.opt.learning_rate}]
-            self.model_optimizer = optim.Adam(df_params, lr=self.opt.learning_rate)
-        else : 
-            self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate) # default=1e-4
+        self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate) # default=1e-4
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(
             self.model_optimizer, self.opt.scheduler_step_size, 0.1) # default=15
 
@@ -156,14 +161,15 @@ class Trainer:
         num_train_samples = len(train_filenames)
         self.num_total_steps = num_train_samples // self.opt.batch_size * self.opt.num_epochs
 
+        # should edit height and width
         train_dataset = self.dataset(
-            self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
+            self.opt.data_path, train_filenames, self.opt.high_height, self.opt.high_width, self.opt.low_height, self.opt.low_width,
             self.opt.frame_ids, 1, is_train=True, img_ext=img_ext) # num_scales = 1
         self.train_loader = DataLoader(
             train_dataset, self.opt.batch_size, True,
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
         val_dataset = self.dataset(
-            self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
+            self.opt.data_path, val_filenames, self.opt.high_height, self.opt.high_width, self.opt.low_height, self.opt.low_width,
             self.opt.frame_ids, 1, is_train=False, img_ext=img_ext) # num_scales = 1
         self.val_loader = DataLoader(
             val_dataset, self.opt.batch_size, True,
