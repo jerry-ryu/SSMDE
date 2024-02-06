@@ -1,0 +1,9 @@
+*.pth
+*.png
+*.jpeg
+*.npy
+wandb
+/resnet50
+/resnet50_high
+*.sh
+
