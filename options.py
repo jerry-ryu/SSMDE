@@ -72,20 +72,35 @@ class MonodepthOptions:
                                           "cityscapes_preprocessed", "mc_dataset", "mc_mini_dataset", "nyu_raw"])
         self.parser.add_argument("--png",
                                  help="if set, trains from raw KITTI png files (instead of jpgs)",
-                                 action="store_true",)
-                              #    default='.png')
-        self.parser.add_argument("--dim_out",
+                                 action="store_true")
+        #high dim_out, query_nums, patch_size
+        self.parser.add_argument("--dim_out_high",
                                  type=int,
                                  help="number of bins",
-                                 default=128)
-        self.parser.add_argument("--query_nums",
+                                 default=100)
+        self.parser.add_argument("--query_nums_high",
                                  type=int,
                                  help="number of queries, should be less than h*w/p^2",
                                  default=128)
-        self.parser.add_argument("--patch_size",
+        self.parser.add_argument("--patch_size_high",
                                  type=int,
                                  help="patch size before ViT",
                                  default=20)
+        
+        #low dim_out, query_nums, patch_size
+        self.parser.add_argument("--dim_out_low",
+                                 type=int,
+                                 help="number of bins",
+                                 default=128)
+        self.parser.add_argument("--query_nums_low",
+                                 type=int,
+                                 help="number of queries, should be less than h*w/p^2",
+                                 default=100)
+        self.parser.add_argument("--patch_size_low",
+                                 type=int,
+                                 help="patch size before ViT",
+                                 default=16)
+        
         self.parser.add_argument("--model_dim",
                                  type=int,
                                  help="model dim",

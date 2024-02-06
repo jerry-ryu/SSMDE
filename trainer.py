@@ -86,12 +86,12 @@ class Trainer:
             
 
         # high depth
-        self.models["depth_high"] = networks.Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size, dim_out=self.opt.dim_out, embedding_dim=self.opt.model_dim, 
-                                                                    query_nums=self.opt.query_nums, num_heads=4, min_val=self.opt.min_depth, max_val=self.opt.max_depth)
+        self.models["depth_high"] = networks.Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size_high, dim_out=self.opt.dim_out_high, embedding_dim=self.opt.model_dim, 
+                                                                    query_nums=self.opt.query_nums_high, num_heads=4, min_val=self.opt.min_depth, max_val=self.opt.max_depth)
         
         # lowh depth
-        self.models["depth_low"] = networks.Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size, dim_out=self.opt.dim_out, embedding_dim=self.opt.model_dim, 
-                                                                    query_nums=self.opt.query_nums, num_heads=4, min_val=self.opt.min_depth, max_val=self.opt.max_depth)
+        self.models["depth_low"] = networks.Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size_low, dim_out=self.opt.dim_out_low, embedding_dim=self.opt.model_dim, 
+                                                                    query_nums=self.opt.query_nums_low, num_heads=4, min_val=self.opt.min_depth, max_val=self.opt.max_depth)
 
         if self.opt.load_pretrained_model:
             # high depth load weight
@@ -134,6 +134,8 @@ class Trainer:
         self.models["pose"] = self.models["pose"].cuda()
         for param in self.models["pose"].parameters():
             param.requires_grad = False
+            
+        
 
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate) # default=1e-4
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(
