@@ -12,20 +12,25 @@
 --num_epochs 25
 --model_dim 32
 
---patch_size 20
---query_nums 128
+--patch_size_high 20
+--query_nums_high 128
+--dim_out_high 100
+
+--patch_size_low 16
+--query_nums_low 120
+--dim_out_low 128
+
 
 --scheduler_step_size 15
 --eval_mono
 --post_process
---dim_out 128
 --min_depth 0.001
 --max_depth 80.0
 --backbone resnet50
 
 --load_pretrained_model
---load_pt_folder_high /mnt/RG/SfMNeXt-Impl/checkpoints/KITTI_320x1024_models
---load_pt_folder_low /mnt/RG/SfMNeXt-Impl/checkpoints/KITTI_192x640_models
+--load_pt_folder_high /mnt/RG/SfMNeXt-Impl/resnet50_high/models/weights_24
+--load_pt_folder_low /mnt/RG/SfMNeXt-Impl/resnet50/models/weights_24
 
 --pretrained_pose
 --pose_net_path /mnt/RG/SfMNeXt-Impl/resnet50_high/models/weights_24
