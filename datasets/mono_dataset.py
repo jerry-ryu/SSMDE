@@ -41,8 +41,10 @@ class MonoDataset(data.Dataset):
     def __init__(self,
                  data_path,
                  filenames,
-                 height,
-                 width,
+                 high_height,
+                 high_width,
+                 low_height,
+                 low_width,
                  frame_idxs,
                  num_scales,
                  is_train=False,
@@ -51,8 +53,13 @@ class MonoDataset(data.Dataset):
 
         self.data_path = data_path
         self.filenames = filenames
-        self.height = height
-        self.width = width
+        
+        self.high_height = high_height
+        self.high_width = high_width
+        
+        self.low_height = low_height
+        self.low_width = low_width        
+        
         self.num_scales = num_scales
         self.interp = Image.ANTIALIAS#interpolation method
 
@@ -79,10 +86,16 @@ class MonoDataset(data.Dataset):
             self.saturation = 0.2
             self.hue = 0.1
 
-        self.resize = {}
+        self.resize_high = {}
         for i in range(self.num_scales):
             s = 2 ** i
-            self.resize[i] = transforms.Resize((self.height // s, self.width // s),
+            self.resize_high[i] = transforms.Resize((self.high_height // s, self.high_width // s),
+                                               interpolation=self.interp)
+        
+        self.resize_low = {}
+        for i in range(self.num_scales):
+            s = 2 ** i
+            self.resize_low[i] = transforms.Resize((self.low_height // s, self.low_width // s),
                                                interpolation=self.interp)
 
         self.load_depth = self.check_depth()
@@ -99,11 +112,16 @@ class MonoDataset(data.Dataset):
             if "color" in k:
                 n, im, i = k
                 for i in range(self.num_scales):
-                    inputs[(n, im, i)] = self.resize[i](inputs[(n, im, i - 1)])
-
+                    inputs[(n, im, i)] = self.resize_high[i](inputs[(n, im, i - 1)])
+                    if im == 0:
+                        inputs[(n+"_low", im, i)] = self.resize_low[i](inputs[(n, im, i - 1)])
         for k in list(inputs):
             f = inputs[k]
             if "color" in k:
+                n, im, i = k
+                inputs[(n, im, i)] = self.to_tensor(f)
+                inputs[(n + "_aug", im, i)] = self.to_tensor(color_aug(f))
+            if "color_low" in k:
                 n, im, i = k
                 inputs[(n, im, i)] = self.to_tensor(f)
                 inputs[(n + "_aug", im, i)] = self.to_tensor(color_aug(f))
@@ -142,7 +160,6 @@ class MonoDataset(data.Dataset):
 
         line = self.filenames[index].split()
         folder = line[0]
-
         if len(line) == 3:
             frame_index = int(line[1])
         else:
@@ -165,9 +182,9 @@ class MonoDataset(data.Dataset):
         for scale in range(self.num_scales):
             K = self.K.copy()
 
-            K[0, :] *= self.width // (2 ** scale)
+            K[0, :] *= self.high_width // (2 ** scale)
             # 这里是为了做norm，内参矩阵必须是归一化的
-            K[1, :] *= self.height // (2 ** scale)
+            K[1, :] *= self.high_height // (2 ** scale)
 
             inv_K = np.linalg.pinv(K)
 
@@ -197,7 +214,7 @@ class MonoDataset(data.Dataset):
             stereo_T[0, 3] = side_sign * baseline_sign * 0.1
 
             inputs["stereo_T"] = torch.from_numpy(stereo_T)
-
+        
         return inputs
 
     def get_color(self, folder, frame_index, side, do_flip):
