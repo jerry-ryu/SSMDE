@@ -90,14 +90,26 @@ class MonodepthOptions:
                                  type=int,
                                  help="model dim",
                                  default=32)
-        self.parser.add_argument("--height",
+        # high resolution image
+        self.parser.add_argument("--high_height",
                                  type=int,
-                                 help="input image height",
+                                 help="high input image height",
                                  default=320)
-        self.parser.add_argument("--width",
+        self.parser.add_argument("--high_width",
                                  type=int,
-                                 help="input image width",
+                                 help="high input image width",
                                  default=1024)
+        
+        # low resolution image
+        self.parser.add_argument("--low_height",
+                                 type=int,
+                                 help="low input image height",
+                                 default=192)
+        self.parser.add_argument("--low_width",
+                                 type=int,
+                                 help="low input image width",
+                                 default=640)
+        
         self.parser.add_argument("--reg_wt",
                                  type=float,
                                  help="regularization term weight",
@@ -186,19 +198,26 @@ class MonodepthOptions:
         self.parser.add_argument("--load_adam",
                                  help="if set, uses load adam state for training",
                                  action="store_true")
+        # load_pretrained_model (encoder, depth)
         self.parser.add_argument("--load_pretrained_model",
                                  help="if set, uses pretrained encoder and depth decoder for training",
                                  action="store_true")
-        self.parser.add_argument("--load_pt_folder",
+        self.parser.add_argument("--load_pt_folder_high",
                                  type=str,
                                  help="path to pretrained model")
+        self.parser.add_argument("--load_pt_folder_low",
+                                 type=str,
+                                 help="path to pretrained model")
+        
+        # load_pretrained_pose (pose)
+        self.parser.add_argument("--pretrained_pose",
+                                 help="if set, uses pretrained posenet for training",
+                                 action="store_true")
         self.parser.add_argument("--pose_net_path",
                                  help="path to pretrained pose net",
                                  type=str,
                                  default="/home/Process3/tmp/mdp/models_22_6_27/models/weights_19/",)
-        self.parser.add_argument("--pretrained_pose",
-                                 help="if set, uses pretrained posenet for training",
-                                 action="store_true")
+
         self.parser.add_argument("--log_attn",
                                  help="if set, log attn maps in evaluation",
                                  action="store_true")
