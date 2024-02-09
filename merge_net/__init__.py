@@ -1,0 +1,1 @@
+from .pix2pix4depth_model import Pix2Pix4DepthModel

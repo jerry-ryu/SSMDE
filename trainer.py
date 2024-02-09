@@ -19,16 +19,19 @@ from layers import *
 
 import datasets
 import networks
+import merge_net
+import unet
 # import wandb
 # from datetime import datetime as dt
 # import uuid
 from collections import OrderedDict
 
+
 PROJECT = "SQLdepth"
 experiment_name="Mono"
 
 class Trainer:
-    def __init__(self, options):
+    def __init__(self, options):        
         self.opt = options
         self.log_path = os.path.join(self.opt.log_dir, self.opt.model_name)
 
@@ -134,9 +137,12 @@ class Trainer:
         self.models["pose"] = self.models["pose"].cuda()
         for param in self.models["pose"].parameters():
             param.requires_grad = False
-            
         
-
+        # self.models["merge"] = merge_net.Pix2Pix4DepthModel()
+        self.models["merge"] = unet.UNet(2,1)
+        self.models["merge"] = torch.nn.DataParallel(self.models["merge"]) 
+        self.parameters_to_train += list(self.models["merge"].parameters())
+            
         self.model_optimizer = optim.Adam(self.parameters_to_train, self.opt.learning_rate) # default=1e-4
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(
             self.model_optimizer, self.opt.scheduler_step_size, 0.1) # default=15
@@ -189,8 +195,8 @@ class Trainer:
         self.backproject_depth = {}
         self.project_3d = {}
         for scale in self.opt.scales:
-            h = self.opt.height // (2 ** scale)
-            w = self.opt.width // (2 ** scale)
+            h = self.opt.high_height // (2 ** scale)
+            w = self.opt.high_width // (2 ** scale)
 
             self.backproject_depth[scale] = BackprojectDepth(self.opt.batch_size, h, w)
             self.backproject_depth[scale].to(self.device)
@@ -291,15 +297,32 @@ class Trainer:
             outputs = self.models["depth"](features[0])
         else:
             # Otherwise, we only feed the image with frame_id 0 through the depth encoder
-            features = self.models["encoder"](inputs["color_aug", 0, 0])
+            features_high = self.models["encoder_high"](inputs["color_aug", 0, 0])
+            features_low = self.models["encoder_low"](inputs["color_low_aug", 0, 0])
 
-            outputs = self.models["depth"](features)
 
+            outputs_high = self.models["depth_high"](features_high)["disp", 0]
+            outputs_low = self.models["depth_low"](features_low)["disp", 0]
+                        
+            outputs = {}
+            
+            output_merged  = self.models["merge"](outputs_low, outputs_high)
+            outputs["disp", 0] = output_merged
+            
+            outputs["high_disp",0] = outputs_high
+            outputs["low_disp",0] = outputs_low
+            
+            
+            # outputs_high = outputs_high["disp", 0]
+            # outputs_low = torch.nn.functional.interpolate(outputs_low["disp", 0],(self.opt.high_height // 2, self.opt.high_width // 2),mode='bilinear',align_corners=False)
+            # outputs_merge = torch.cat((outputs_high,outputs_low), 1)
+            # outputs["disp", 0] = torch.mean(outputs_merge,1, keepdim = True)
+            
         if self.opt.predictive_mask: # default no
             outputs["predictive_mask"] = self.models["predictive_mask"](features)
         # self.use_pose_net = not (self.opt.use_stereo and self.opt.frame_ids == [0])
         if self.use_pose_net: # default=True
-            outputs.update(self.predict_poses(inputs, features))
+            outputs.update(self.predict_poses(inputs, features_high))
 
         self.generate_images_pred(inputs, outputs)
         losses = self.compute_losses(inputs, outputs)
@@ -401,7 +424,7 @@ class Trainer:
                 source_scale = scale
             else:
                 disp = F.interpolate(
-                    disp, [self.opt.height, self.opt.width], mode="bilinear", align_corners=False)
+                    disp, [self.opt.high_height, self.opt.high_width], mode="bilinear", align_corners=False)
                 source_scale = 0
 
                 depth = disp
@@ -475,7 +498,7 @@ class Trainer:
             else:
                 source_scale = 0
 
-            disp = outputs[("disp", scale)]
+            disp = outputs[("disp", scale)]            
             color = inputs[("color", 0, scale)]
             target = inputs[("color", 0, source_scale)]
 
@@ -539,7 +562,7 @@ class Trainer:
 
             loss += to_optimise.mean()
             if color.shape[-2:] != disp.shape[-2:]:
-                disp = F.interpolate(disp, [self.opt.height, self.opt.width], mode="bilinear", align_corners=False)
+                disp = F.interpolate(disp, [self.opt.high_height, self.opt.high_width], mode="bilinear", align_corners=False)
             mean_disp = disp.mean(2, True).mean(3, True)
             norm_disp = disp / (mean_disp + 1e-7)
             # if GPU memory is not enough, you can downsample color instead
@@ -619,6 +642,14 @@ class Trainer:
                 writer.add_image(
                     "disp_{}/{}".format(s, j),
                     normalize_image(outputs[("disp", s)][j]), self.step)
+                
+                writer.add_image(
+                    "disp_high_{}/{}".format(s, j),
+                    normalize_image(outputs[("high_disp", s)][j]), self.step)
+                
+                writer.add_image(
+                    "disp_low_{}/{}".format(s, j),
+                    normalize_image(outputs[("low_disp", s)][j]), self.step)
 
                 if self.opt.predictive_mask:
                     for f_idx, frame_id in enumerate(self.opt.frame_ids[1:]):
