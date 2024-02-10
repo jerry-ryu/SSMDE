@@ -1,0 +1,22 @@
+--data_path /mnt/RG/dataset/kitti_data
+--log_dir /mnt/RG/SfMNeXt-Impl/boost
+--model_name resnet_320x1024
+--dataset kitti 
+--eval_split eigen
+--backbone resnet_lite
+--height 320 
+--width 1024
+--batch_size 8
+--num_epochs 25
+--scheduler_step_size 15
+--model_dim 32
+--patch_size 20
+--dim_out 128
+--query_nums 128
+--num_features 256
+--num_layers 50
+--min_depth 0.001
+--max_depth 80.0
+--use_stereo
+--eval_mono
+--post_process
