@@ -55,10 +55,12 @@ class Trainer:
         if self.opt.use_stereo:
             self.opt.frame_ids.append("s")
 
-        # high encoder
-        self.models["encoder_high"] = networks.Unet(pretrained=(not self.opt.load_pretrained_model), backbone=self.opt.backbone, in_channels=3, num_classes=self.opt.model_dim, decoder_channels=self.opt.dec_channels)
-        # low encoder 
-        self.models["encoder_low"] = networks.Unet(pretrained=(not self.opt.load_pretrained_model), backbone=self.opt.backbone, in_channels=3, num_classes=self.opt.model_dim, decoder_channels=self.opt.dec_channels)
+        
+        if self.opt.backbone in ["resnet", "resnet_lite"]:
+            # high encoder
+            self.models["encoder_high"] = networks.ResnetEncoderDecoder(num_layers=self.opt.num_layers, num_features=self.opt.num_features, model_dim=self.opt.model_dim)
+            # low encoder 
+            self.models["encoder_low"] = networks.ResnetEncoderDecoder(num_layers=self.opt.num_layers, num_features=self.opt.num_features, model_dim=self.opt.model_dim)
 
         if self.opt.load_pretrained_model:
             # high encoder load weight
@@ -88,13 +90,15 @@ class Trainer:
         # self.parameters_to_train += list(self.models["encoder"].parameters())
             
 
-        # high depth
-        self.models["depth_high"] = networks.Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size_high, dim_out=self.opt.dim_out_high, embedding_dim=self.opt.model_dim, 
-                                                                    query_nums=self.opt.query_nums_high, num_heads=4, min_val=self.opt.min_depth, max_val=self.opt.max_depth)
         
-        # lowh depth
-        self.models["depth_low"] = networks.Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size_low, dim_out=self.opt.dim_out_low, embedding_dim=self.opt.model_dim, 
+        if self.opt.backbone.endswith("_lite"):
+            # high depth
+            self.models["depth_high"] = networks.Lite_Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size_high, dim_out=self.opt.dim_out_high, embedding_dim=self.opt.model_dim, 
+                                                                    query_nums=self.opt.query_nums_high, num_heads=4, min_val=self.opt.min_depth, max_val=self.opt.max_depth)
+            #low depth
+            self.models["depth_low"] = networks.Lite_Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size_low, dim_out=self.opt.dim_out_low, embedding_dim=self.opt.model_dim, 
                                                                     query_nums=self.opt.query_nums_low, num_heads=4, min_val=self.opt.min_depth, max_val=self.opt.max_depth)
+
 
         if self.opt.load_pretrained_model:
             # high depth load weight
@@ -275,8 +279,21 @@ class Trainer:
                 self.log("train", inputs, outputs, losses)
                 self.val()
 
-            self.step += 1
-
+            self.step += 1    
+    
+    def normalize(self, depth_map):
+        ma = self.opt.max_depth
+        mi = self.opt.min_depth
+        d = ma - mi if ma != mi else 1e5
+        return (depth_map - mi) / d
+        
+    def denormalize(self, depth_map):
+        ma = self.opt.max_depth
+        mi = self.opt.min_depth
+        d = ma - mi if ma != mi else 1e5
+        return  mi + (depth_map * d) 
+        
+    
     def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses
         """
@@ -303,15 +320,21 @@ class Trainer:
 
             outputs_high = self.models["depth_high"](features_high)["disp", 0]
             outputs_low = self.models["depth_low"](features_low)["disp", 0]
-                        
-            outputs = {}
             
-            output_merged  = self.models["merge"](outputs_low, outputs_high)
-            outputs["disp", 0] = output_merged
+            outputs = {}
             
             outputs["high_disp",0] = outputs_high
             outputs["low_disp",0] = outputs_low
             
+            outputs_low = torch.nn.functional.interpolate(outputs_low,(self.opt.high_height // 2,self.opt.high_width // 2),mode='bilinear',align_corners=False) 
+            
+            outputs_high = self.normalize(outputs_high)
+            outputs_low = self.normalize(outputs_low)
+            
+            outputs_merge = torch.cat((outputs_high,outputs_low), 1)
+            output_merged  = self.models["merge"](outputs_merge)
+            output_merged = self.denormalize(output_merged)
+            outputs["disp", 0] = output_merged
             
             # outputs_high = outputs_high["disp", 0]
             # outputs_low = torch.nn.functional.interpolate(outputs_low["disp", 0],(self.opt.high_height // 2, self.opt.high_width // 2),mode='bilinear',align_corners=False)
@@ -624,6 +647,19 @@ class Trainer:
     def log(self, mode, inputs, outputs, losses):
         """Write an event to the tensorboard events file
         """
+        f = open("/mnt/RG/SfMNeXt-Impl/abc.txt", "a")
+        print(f"<{self.step}>", file =f)
+        print("high_max",torch.max(outputs["high_disp",0]).item(),"high_95",torch.quantile(outputs["high_disp",0].flatten(), 0.95).item(),\
+            "high_75",torch.quantile(outputs["high_disp",0].flatten(), 0.75).item(), "high_50",torch.quantile(outputs["high_disp",0].flatten(), 0.50).item(),\
+                "high_min",torch.min(outputs["high_disp",0]).item(),file =f)
+        print("low_max",torch.max(outputs["low_disp",0]).item(),"low_95",torch.quantile(outputs["low_disp",0].flatten(), 0.95).item(),\
+            "low_75",torch.quantile(outputs["low_disp",0].flatten(), 0.75).item(), "low_50",torch.quantile(outputs["low_disp",0].flatten(), 0.50).item(), \
+                "low_min",torch.min(outputs["low_disp",0]).item(),file =f)
+        print("merged_max",torch.max(outputs["disp", 0]).item(),"merged_95",torch.quantile(outputs["disp",0].flatten(), 0.95).item(),\
+            "merged_75",torch.quantile(outputs["disp",0].flatten(), 0.75).item(), "merged_50",torch.quantile(outputs["disp",0].flatten(), 0.50).item(), \
+                "merged_min",torch.min(outputs["disp",0]).item(),file =f)
+        print("", file = f)
+        
         writer = self.writers[mode]
         for l, v in losses.items():
             writer.add_scalar("{}".format(l), v, self.step)
