@@ -8,32 +8,35 @@
 --low_height 192
 --low_width 640
 
---batch_size 12
+--batch_size 8
 --num_epochs 25
 --model_dim 32
+--num_layers 50
+--num_features 256
 
 --patch_size_high 20
 --query_nums_high 128
---dim_out_high 100
+--dim_out_high 128
 
 --patch_size_low 16
---query_nums_low 120
---dim_out_low 128
+--query_nums_low 64
+--dim_out_low 64
 
 
 --scheduler_step_size 15
+--use_stereo
 --eval_mono
 --post_process
 --min_depth 0.001
 --max_depth 80.0
---backbone resnet50
+--backbone resnet_lite
 
 --load_pretrained_model
---load_pt_folder_high /mnt/RG/SfMNeXt-Impl/resnet50_high/models/weights_24
---load_pt_folder_low /mnt/RG/SfMNeXt-Impl/resnet50/models/weights_24
+--load_pt_folder_high /mnt/RG/SfMNeXt-Impl/checkpoints/KITTI_320x1024_models
+--load_pt_folder_low /mnt/RG/SfMNeXt-Impl/checkpoints/KITTI_192x640_models
 
 --pretrained_pose
---pose_net_path /mnt/RG/SfMNeXt-Impl/resnet50_high/models/weights_24
+--pose_net_path /mnt/RG/SfMNeXt-Impl/checkpoints/pose
 
---log_dir /mnt/RG/SfMNeXt-Impl
---model_name resnet50_boost
+--log_dir /mnt/RG/SfMNeXt-Impl/boost
+--model_name resnet50_boost_RE
