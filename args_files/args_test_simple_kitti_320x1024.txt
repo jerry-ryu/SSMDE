@@ -1,19 +1,15 @@
---data_path /mnt/RG/dataset/kitti_data
---dataset kitti
---eval_split eigen
---height 320
+--load_pretrained_model
+--load_pt_folder /mnt/RG/SfMNeXt-Impl/checkpoints/KITTI_320x1024_models
+--image_path /mnt/RG/SfMNeXt-Impl/sample/0000000076.jpg
+--height 320 
 --width 1024
---batch_size 8
---num_epochs 25
 --model_dim 32
 --patch_size 20
+--dim_out 128
 --query_nums 128
---scheduler_step_size 15
---eval_mono
---post_process
---dim_out 100
---min_depth 0.001
+--num_features 256
+--num_layers 50
+--min_depth 0.01
 --max_depth 80.0
---backbone resnet50
---log_dir /mnt/RG/SfMNeXt-Impl
---model_name resnet50_high
+--backbone resnet_lite
+--ext jpg
