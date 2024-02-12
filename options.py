@@ -303,7 +303,7 @@ class MonodepthOptions:
         self.parser.add_argument("--num_workers",
                                  type=int,
                                  help="number of dataloader workers",
-                                 default=4)
+                                 default=2)
 
         # LOADING options
         self.parser.add_argument("--pred_metric_depth",

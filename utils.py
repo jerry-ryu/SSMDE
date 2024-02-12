@@ -24,8 +24,8 @@ def readlines(filename):
 def normalize_image(x):
     """Rescale image pixels to span range [0, 1]
     """
-    ma = float(x.max().cpu().data)
-    mi = float(x.min().cpu().data)
+    ma = float(80.0)
+    mi = float(0.001)
     d = ma - mi if ma != mi else 1e5
     return (x - mi) / d
 
