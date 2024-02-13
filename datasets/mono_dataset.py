@@ -154,11 +154,16 @@ class MonoDataset(data.Dataset):
             3       images resized to (self.width // 8, self.height // 8)
         """
         inputs = {}
+        
+        
 
         do_color_aug = self.is_train and random.random() > 0.5
         do_flip = self.is_train and random.random() > 0.5
 
         line = self.filenames[index].split()
+        
+        inputs["path"] = line
+        
         folder = line[0]
         if len(line) == 3:
             frame_index = int(line[1])

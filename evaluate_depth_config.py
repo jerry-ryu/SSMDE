@@ -14,6 +14,7 @@ from utils import readlines
 from options import MonodepthOptions
 import datasets
 import networks
+import unet
 from utils import normalize_image
 from torch.utils.tensorboard.writer import SummaryWriter
 
@@ -58,6 +59,18 @@ def batch_post_process_disparity(l_disp, r_disp):
     r_mask = l_mask[:, :, ::-1]
     return r_mask * l_disp + l_mask * r_disp + (1.0 - l_mask - r_mask) * m_disp
 
+def normalize(opt, depth_map):
+    ma = opt.max_depth
+    mi = opt.min_depth
+    d = ma - mi if ma != mi else 1e5
+    return (depth_map - mi) / d
+    
+def denormalize(opt, depth_map):
+    ma = opt.max_depth
+    mi = opt.min_depth
+    d = ma - mi if ma != mi else 1e5
+    return  mi + (depth_map * d) 
+
 
 def evaluate(opt):
     """Evaluates a pretrained model using a specified test set
@@ -69,7 +82,6 @@ def evaluate(opt):
         "Please choose mono or stereo evaluation by setting either --eval_mono or --eval_stereo"
 
     if opt.ext_disp_to_eval is None:
-
         opt.load_weights_folder = os.path.expanduser(opt.load_weights_folder)
 
         assert os.path.isdir(opt.load_weights_folder), \
@@ -78,79 +90,108 @@ def evaluate(opt):
         print("-> Loading weights from {}".format(opt.load_weights_folder))
 
         filenames = readlines(os.path.join(splits_dir, opt.eval_split, "test_files.txt"))
-        encoder_path = os.path.join(opt.load_weights_folder, "encoder.pth")
-        decoder_path = os.path.join(opt.load_weights_folder, "depth.pth")
+        high_encoder_path = os.path.join(opt.load_weights_folder, "encoder_high.pth")
+        low_encoder_path = os.path.join(opt.load_weights_folder, "encoder_low.pth")
+        high_decoder_path = os.path.join(opt.load_weights_folder, "depth_high.pth")
+        low_decoder_path = os.path.join(opt.load_weights_folder, "depth_low.pth")
 
-        encoder_dict = torch.load(encoder_path)
-
+        
+        img_ext = '.png' if opt.png else '.jpg'
+        
         dataset = datasets.KITTIRAWDataset(opt.data_path, filenames,
-                                           encoder_dict['height'], encoder_dict['width'],
-                                           [0], 1, is_train=False)
+                                           opt.high_height, opt.high_width, opt.low_height,opt.low_width,
+                                           [0], 1, is_train=False, img_ext=img_ext)
         dataloader = DataLoader(dataset, 1, shuffle=False, num_workers=opt.num_workers,
                                 pin_memory=True, drop_last=False)
 
         if opt.backbone in ["resnet", "resnet_lite"]:
-            encoder = networks.ResnetEncoderDecoder(num_layers=opt.num_layers, num_features=opt.num_features, model_dim=opt.model_dim)
-        elif opt.backbone == "resnet18_lite":
-            encoder = networks.LiteResnetEncoderDecoder(model_dim=opt.model_dim)
-        elif opt.backbone == "eff_b5":
-            encoder = networks.BaseEncoder.build(num_features=opt.num_features, model_dim=opt.model_dim)
-        else: 
-            encoder = networks.Unet(pretrained=(not opt.load_pretrained_model), backbone=opt.backbone, in_channels=3, num_classes=opt.model_dim, decoder_channels=opt.dec_channels)
+            encoder_high = networks.ResnetEncoderDecoder(num_layers=opt.num_layers, num_features=opt.num_features, model_dim=opt.model_dim)
+            encoder_low = networks.ResnetEncoderDecoder(num_layers=opt.num_layers, num_features=opt.num_features, model_dim=opt.model_dim)
 
         if opt.backbone.endswith("_lite"):
-            depth_decoder = networks.Lite_Depth_Decoder_QueryTr(in_channels=opt.model_dim, patch_size=opt.patch_size, dim_out=opt.dim_out, embedding_dim=opt.model_dim, 
-                                                        query_nums=opt.query_nums, num_heads=4, min_val=opt.min_depth, max_val=opt.max_depth)
-        else:
-            depth_decoder = networks.Depth_Decoder_QueryTr(in_channels=opt.model_dim, patch_size=opt.patch_size, dim_out=opt.dim_out, embedding_dim=opt.model_dim, 
-                                                   query_nums=opt.query_nums, num_heads=4, min_val=opt.min_depth, max_val=opt.max_depth)
+            depth_decoder_high = networks.Lite_Depth_Decoder_QueryTr(in_channels=opt.model_dim, patch_size=opt.patch_size_high, dim_out=opt.dim_out_high, embedding_dim=opt.model_dim, 
+                                                                    query_nums=opt.query_nums_high, num_heads=4, min_val=opt.min_depth, max_val=opt.max_depth)
+            depth_decoder_low = networks.Lite_Depth_Decoder_QueryTr(in_channels=opt.model_dim, patch_size=opt.patch_size_low, dim_out=opt.dim_out_low, embedding_dim=opt.model_dim, 
+                                                                    query_nums=opt.query_nums_low, num_heads=4, min_val=opt.min_depth, max_val=opt.max_depth)
 
-        model_dict = encoder.state_dict()
-        encoder.load_state_dict({k: v for k, v in encoder_dict.items() if k in model_dict})
-        depth_decoder.load_state_dict(torch.load(decoder_path))
+        #high
+        high_encoder_dict = torch.load(high_encoder_path)
+        model_dict_high = encoder_high.state_dict()
+        encoder_high.load_state_dict({k: v for k, v in high_encoder_dict.items() if k in model_dict_high})        
+        depth_decoder_high.load_state_dict(torch.load(high_decoder_path))
 
-        encoder.cuda()
-        encoder = torch.nn.DataParallel(encoder)
-        encoder.eval()
-        depth_decoder.cuda()
-        depth_decoder = torch.nn.DataParallel(depth_decoder)
-        depth_decoder.eval()
+        encoder_high.cuda()
+        encoder_high = torch.nn.DataParallel(encoder_high)
+        encoder_high.eval()
+        depth_decoder_high.cuda()
+        depth_decoder_high = torch.nn.DataParallel(depth_decoder_high)
+        depth_decoder_high.eval()
+        
+        #low
+        low_encoder_dict = torch.load(low_encoder_path)
+        model_dict_low = encoder_low.state_dict()
+        encoder_low.load_state_dict({k: v for k, v in low_encoder_dict.items() if k in model_dict_low})        
+        depth_decoder_low.load_state_dict(torch.load(low_decoder_path))
 
+        encoder_low.cuda()
+        encoder_low = torch.nn.DataParallel(encoder_low)
+        encoder_low.eval()
+        depth_decoder_low.cuda()
+        depth_decoder_low = torch.nn.DataParallel(depth_decoder_low)
+        depth_decoder_low.eval()
+        
+        
+        #merge
+        merge_net_path = os.path.join(opt.load_weights_folder, "merge.pth")
+        merge_net=unet.UNet(2,1)
+        merge_net.load_state_dict(torch.load(merge_net_path))
+        merge_net.cuda()
+        merge_net = torch.nn.DataParallel(merge_net)
+        merge_net.eval()
+        
+        
         pred_disps = []
         src_imgs = []
         error_maps = []
 
-        print("-> Computing predictions with size {}x{}".format(
-            encoder_dict['width'], encoder_dict['height']))
+        print("-> Computing predictions with size {}x{} & {}x{}".format(
+             opt.high_height, opt.high_width, opt.low_height,opt.low_width))
 
         step = 0
         with torch.no_grad():
             for data in dataloader:
+                
+                print(data["path"][0][0]+"/"+data["path"][1][0])
+                
                 step = step + 1
-                input_color = data[("color", 0, 0)].cuda()
-
+                input_color_high_out = data[("color", 0, 0)].cuda()
+                input_color_low = data[("color_low", 0, 0)].cuda()
+                
                 if opt.post_process:
                     # Post-processed results require each image to have two forward passes
-                    input_color = torch.cat((input_color, torch.flip(input_color, [3])), 0)
+                    input_color_high = torch.cat((input_color_high_out, torch.flip(input_color_high_out, [3])), 0)
+                    input_color_low = torch.cat((input_color_low, torch.flip(input_color_low, [3])), 0)
 
-                output = depth_decoder(encoder(input_color))
-                if opt.log_attn:
-                    attn = output[("attn", 0)]
-                    writer = writers["vis"]
-                    for j in range(min(4, opt.batch_size)):  # write a maxmimum of four images
-                        writer.add_image(
-                            "color_{}/{}".format(0, j),
-                            input_color[j].data, step)
-                        writer.add_image(
-                            "disp_{}/{}".format(0, j),
-                            normalize_image(output[("disp", 0)][j].data), step)
-                        for k in range(100):
-                            # print(attn[j][k].unsqueeze(0).shape)
-                            writer.add_image(
-                                "attn_{}/{}".format(j, k),
-                                normalize_image(attn[j][k].unsqueeze(0).data), step)
+                output_high_out = depth_decoder_high(encoder_high(input_color_high))["disp", 0]
+                output_low_out = depth_decoder_low(encoder_low(input_color_low))["disp", 0]
+                
+                output_low = torch.nn.functional.interpolate(output_low_out,(opt.high_height // 2,opt.high_width // 2),mode='bilinear',align_corners=False) 
+                
+                output_high = normalize(opt, output_high_out)
+                output_low = normalize(opt, output_low)
+                
+                outputs_merge = torch.cat((output_high,output_low), 1)
+                output_merged  = merge_net(outputs_merge)
+                output_merged = denormalize(opt, output_merged)
+                outputs = {}
+                outputs["disp", 0] = output_merged
+                
+               
+                                
+                
+                
 
-                pred_disp = output[("disp", 0)]
+                pred_disp = outputs[("disp", 0)]
                 # pred_disp, _ = disp_to_depth(output[("disp", 0)], opt.min_depth, opt.max_depth)
                 pred_disp = pred_disp.cpu()[:, 0].numpy()
 
@@ -160,6 +201,68 @@ def evaluate(opt):
 
                 pred_disps.append(pred_disp)
                 # src_imgs.append(data[("color", 0, 0)])
+                
+                # viz
+                import PIL.Image as pil
+                from PIL import ImageFile
+                ImageFile.LOAD_TRUNCATED_IMAGES = True
+                import matplotlib as mpl
+                from matplotlib import pyplot as plt
+                import matplotlib.cm as cm
+                
+                final = torch.nn.functional.interpolate(
+                torch.unsqueeze(torch.from_numpy(pred_disp),dim=0), (384, 1280), mode="bilinear", align_corners=False)
+                final = final.squeeze().cpu().numpy()
+                
+                high = torch.nn.functional.interpolate(
+                output_high_out, (384, 1280), mode="bilinear", align_corners=False)
+                high = high.cpu()[:, 0].numpy()
+                N = high.shape[0] // 2
+                high = batch_post_process_disparity(high[:N], high[N:, :, ::-1]).squeeze()
+                
+                low = torch.nn.functional.interpolate(
+                output_low_out, (384, 1280), mode="bilinear", align_corners=False)
+                low = low.cpu()[:, 0].numpy()
+                N = low.shape[0] // 2
+                low = batch_post_process_disparity(low[:N], low[N:, :, ::-1]).squeeze()
+                
+                output_directory = "/mnt/RG/SfMNeXt-Impl/viz"
+                output_dir=data["path"][0][0]
+                output_name = data["path"][1][0]
+                to_save_dir = os.path.join(output_directory, output_dir,output_name)
+                
+                
+                if not os.path.exists(to_save_dir):
+                    os.makedirs(to_save_dir)
+                
+                vmax = np.percentile(final, 95)
+                normalizer = mpl.colors.Normalize(vmin=final.min(), vmax=vmax)
+                mapper = cm.ScalarMappable(norm=normalizer, cmap='plasma_r')
+                # mapper = cm.ScalarMappable(norm=normalizer, cmap='viridis')
+                colormapped_im = (mapper.to_rgba(final)[:, :, :3] * 255).astype(np.uint8)
+                im = pil.fromarray(colormapped_im)
+                name_dest_im = os.path.join(to_save_dir, "merged.jpeg")
+                im.save(name_dest_im)
+                
+                
+                colormapped_im = (mapper.to_rgba(high)[:, :, :3] * 255).astype(np.uint8)
+                im = pil.fromarray(colormapped_im)
+                name_dest_im = os.path.join(to_save_dir, "high.jpeg")
+                im.save(name_dest_im)
+                
+                colormapped_im = (mapper.to_rgba(low)[:, :, :3] * 255).astype(np.uint8)
+                im = pil.fromarray(colormapped_im)
+                name_dest_im = os.path.join(to_save_dir, "low.jpeg")
+                im.save(name_dest_im)
+                
+                input_color_high_out = input_color_high_out.squeeze().permute(1, 2, 0).cpu().numpy() * 255
+                input_color_high_out = input_color_high_out.astype(np.uint8)
+                
+                im = pil.fromarray(input_color_high_out)
+                name_dest_im = os.path.join(to_save_dir, "RGB.jpeg")
+                
+                im.save(name_dest_im)
+                
 
         pred_disps = np.concatenate(pred_disps)
         # src_imgs = np.concatenate(src_imgs)
