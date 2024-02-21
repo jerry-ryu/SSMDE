@@ -162,8 +162,6 @@ class MonoDataset(data.Dataset):
 
         line = self.filenames[index].split()
         
-        inputs["path"] = line
-        
         folder = line[0]
         if len(line) == 3:
             frame_index = int(line[1])
