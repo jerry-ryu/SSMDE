@@ -73,6 +73,11 @@ def denormalize(opt, depth_map):
 
 
 def evaluate(opt):
+    print("####################################")
+    print()
+    print(opt.load_weights_folder)
+    print()
+    print("####################################")
     """Evaluates a pretrained model using a specified test set
     """
     MIN_DEPTH = 1e-3
@@ -93,8 +98,6 @@ def evaluate(opt):
         high_encoder_path = os.path.join(opt.load_weights_folder, "encoder_high.pth")
         low_encoder_path = os.path.join(opt.load_weights_folder, "encoder_low.pth")
         high_decoder_path = os.path.join(opt.load_weights_folder, "depth_high.pth")
-        low_decoder_path = os.path.join(opt.load_weights_folder, "depth_low.pth")
-
         
         img_ext = '.png' if opt.png else '.jpg'
         
@@ -111,9 +114,6 @@ def evaluate(opt):
         if opt.backbone.endswith("_lite"):
             depth_decoder_high = networks.Lite_Depth_Decoder_QueryTr(in_channels=opt.model_dim, patch_size=opt.patch_size_high, dim_out=opt.dim_out_high, embedding_dim=opt.model_dim, 
                                                                     query_nums=opt.query_nums_high, num_heads=4, min_val=opt.min_depth, max_val=opt.max_depth)
-            depth_decoder_low = networks.Lite_Depth_Decoder_QueryTr(in_channels=opt.model_dim, patch_size=opt.patch_size_low, dim_out=opt.dim_out_low, embedding_dim=opt.model_dim, 
-                                                                    query_nums=opt.query_nums_low, num_heads=4, min_val=opt.min_depth, max_val=opt.max_depth)
-
         #high
         high_encoder_dict = torch.load(high_encoder_path)
         model_dict_high = encoder_high.state_dict()
@@ -131,19 +131,15 @@ def evaluate(opt):
         low_encoder_dict = torch.load(low_encoder_path)
         model_dict_low = encoder_low.state_dict()
         encoder_low.load_state_dict({k: v for k, v in low_encoder_dict.items() if k in model_dict_low})        
-        depth_decoder_low.load_state_dict(torch.load(low_decoder_path))
 
         encoder_low.cuda()
         encoder_low = torch.nn.DataParallel(encoder_low)
         encoder_low.eval()
-        depth_decoder_low.cuda()
-        depth_decoder_low = torch.nn.DataParallel(depth_decoder_low)
-        depth_decoder_low.eval()
         
         
         #merge
         merge_net_path = os.path.join(opt.load_weights_folder, "merge.pth")
-        merge_net=unet.UNet(2,1)
+        merge_net=unet.UNet(64,32)
         merge_net.load_state_dict(torch.load(merge_net_path))
         merge_net.cuda()
         merge_net = torch.nn.DataParallel(merge_net)
@@ -161,8 +157,6 @@ def evaluate(opt):
         with torch.no_grad():
             for data in dataloader:
                 
-                print(data["path"][0][0]+"/"+data["path"][1][0])
-                
                 step = step + 1
                 input_color_high_out = data[("color", 0, 0)].cuda()
                 input_color_low = data[("color_low", 0, 0)].cuda()
@@ -171,20 +165,19 @@ def evaluate(opt):
                     # Post-processed results require each image to have two forward passes
                     input_color_high = torch.cat((input_color_high_out, torch.flip(input_color_high_out, [3])), 0)
                     input_color_low = torch.cat((input_color_low, torch.flip(input_color_low, [3])), 0)
-
-                output_high_out = depth_decoder_high(encoder_high(input_color_high))["disp", 0]
-                output_low_out = depth_decoder_low(encoder_low(input_color_low))["disp", 0]
+                    
+                features_high = encoder_high(input_color_high)
+                features_low = encoder_low(input_color_low)
                 
-                output_low = torch.nn.functional.interpolate(output_low_out,(opt.high_height // 2,opt.high_width // 2),mode='bilinear',align_corners=False) 
+                _, _, features_h, features_w = features_high.size()
+                features_low = torch.nn.functional.interpolate(features_low,(features_h,features_w),mode='bilinear',align_corners=False) 
+                outputs_merged = torch.cat((features_high,features_low), 1)
+                features_merged = merge_net(outputs_merged)  
                 
-                output_high = normalize(opt, output_high_out)
-                output_low = normalize(opt, output_low)
+                output_high_out = depth_decoder_high(features_merged)["disp", 0]
                 
-                outputs_merge = torch.cat((output_high,output_low), 1)
-                output_merged  = merge_net(outputs_merge)
-                output_merged = denormalize(opt, output_merged)
                 outputs = {}
-                outputs["disp", 0] = output_merged
+                outputs["disp", 0] = output_high_out
                 
                
                                 
@@ -203,65 +196,65 @@ def evaluate(opt):
                 # src_imgs.append(data[("color", 0, 0)])
                 
                 # viz
-                import PIL.Image as pil
-                from PIL import ImageFile
-                ImageFile.LOAD_TRUNCATED_IMAGES = True
-                import matplotlib as mpl
-                from matplotlib import pyplot as plt
-                import matplotlib.cm as cm
+        #         import PIL.Image as pil
+        #         from PIL import ImageFile
+        #         ImageFile.LOAD_TRUNCATED_IMAGES = True
+        #         import matplotlib as mpl
+        #         from matplotlib import pyplot as plt
+        #         import matplotlib.cm as cm
                 
-                final = torch.nn.functional.interpolate(
-                torch.unsqueeze(torch.from_numpy(pred_disp),dim=0), (384, 1280), mode="bilinear", align_corners=False)
-                final = final.squeeze().cpu().numpy()
+        #         final = torch.nn.functional.interpolate(
+        #         torch.unsqueeze(torch.from_numpy(pred_disp),dim=0), (384, 1280), mode="bilinear", align_corners=False)
+        #         final = final.squeeze().cpu().numpy()
                 
-                high = torch.nn.functional.interpolate(
-                output_high_out, (384, 1280), mode="bilinear", align_corners=False)
-                high = high.cpu()[:, 0].numpy()
-                N = high.shape[0] // 2
-                high = batch_post_process_disparity(high[:N], high[N:, :, ::-1]).squeeze()
+        #         high = torch.nn.functional.interpolate(
+        #         output_high_out, (384, 1280), mode="bilinear", align_corners=False)
+        #         high = high.cpu()[:, 0].numpy()
+        #         N = high.shape[0] // 2
+        #         high = batch_post_process_disparity(high[:N], high[N:, :, ::-1]).squeeze()
                 
-                low = torch.nn.functional.interpolate(
-                output_low_out, (384, 1280), mode="bilinear", align_corners=False)
-                low = low.cpu()[:, 0].numpy()
-                N = low.shape[0] // 2
-                low = batch_post_process_disparity(low[:N], low[N:, :, ::-1]).squeeze()
+        #         low = torch.nn.functional.interpolate(
+        #         output_low_out, (384, 1280), mode="bilinear", align_corners=False)
+        #         low = low.cpu()[:, 0].numpy()
+        #         N = low.shape[0] // 2
+        #         low = batch_post_process_disparity(low[:N], low[N:, :, ::-1]).squeeze()
                 
-                output_directory = "/mnt/RG/SfMNeXt-Impl/viz"
-                output_dir=data["path"][0][0]
-                output_name = data["path"][1][0]
-                to_save_dir = os.path.join(output_directory, output_dir,output_name)
-                
-                
-                if not os.path.exists(to_save_dir):
-                    os.makedirs(to_save_dir)
-                
-                vmax = np.percentile(final, 95)
-                normalizer = mpl.colors.Normalize(vmin=final.min(), vmax=vmax)
-                mapper = cm.ScalarMappable(norm=normalizer, cmap='plasma_r')
-                # mapper = cm.ScalarMappable(norm=normalizer, cmap='viridis')
-                colormapped_im = (mapper.to_rgba(final)[:, :, :3] * 255).astype(np.uint8)
-                im = pil.fromarray(colormapped_im)
-                name_dest_im = os.path.join(to_save_dir, "merged.jpeg")
-                im.save(name_dest_im)
+        #         output_directory = "/mnt/RG/SfMNeXt-Impl/viz"
+        #         output_dir=data["path"][0][0]
+        #         output_name = data["path"][1][0]
+        #         to_save_dir = os.path.join(output_directory, output_dir,output_name)
                 
                 
-                colormapped_im = (mapper.to_rgba(high)[:, :, :3] * 255).astype(np.uint8)
-                im = pil.fromarray(colormapped_im)
-                name_dest_im = os.path.join(to_save_dir, "high.jpeg")
-                im.save(name_dest_im)
+        #         if not os.path.exists(to_save_dir):
+        #             os.makedirs(to_save_dir)
                 
-                colormapped_im = (mapper.to_rgba(low)[:, :, :3] * 255).astype(np.uint8)
-                im = pil.fromarray(colormapped_im)
-                name_dest_im = os.path.join(to_save_dir, "low.jpeg")
-                im.save(name_dest_im)
+        #         vmax = np.percentile(final, 95)
+        #         normalizer = mpl.colors.Normalize(vmin=final.min(), vmax=vmax)
+        #         mapper = cm.ScalarMappable(norm=normalizer, cmap='plasma_r')
+        #         # mapper = cm.ScalarMappable(norm=normalizer, cmap='viridis')
+        #         colormapped_im = (mapper.to_rgba(final)[:, :, :3] * 255).astype(np.uint8)
+        #         im = pil.fromarray(colormapped_im)
+        #         name_dest_im = os.path.join(to_save_dir, "merged.jpeg")
+        #         im.save(name_dest_im)
                 
-                input_color_high_out = input_color_high_out.squeeze().permute(1, 2, 0).cpu().numpy() * 255
-                input_color_high_out = input_color_high_out.astype(np.uint8)
                 
-                im = pil.fromarray(input_color_high_out)
-                name_dest_im = os.path.join(to_save_dir, "RGB.jpeg")
+        #         colormapped_im = (mapper.to_rgba(high)[:, :, :3] * 255).astype(np.uint8)
+        #         im = pil.fromarray(colormapped_im)
+        #         name_dest_im = os.path.join(to_save_dir, "high.jpeg")
+        #         im.save(name_dest_im)
                 
-                im.save(name_dest_im)
+        #         colormapped_im = (mapper.to_rgba(low)[:, :, :3] * 255).astype(np.uint8)
+        #         im = pil.fromarray(colormapped_im)
+        #         name_dest_im = os.path.join(to_save_dir, "low.jpeg")
+        #         im.save(name_dest_im)
+                
+        #         input_color_high_out = input_color_high_out.squeeze().permute(1, 2, 0).cpu().numpy() * 255
+        #         input_color_high_out = input_color_high_out.astype(np.uint8)
+                
+        #         im = pil.fromarray(input_color_high_out)
+        #         name_dest_im = os.path.join(to_save_dir, "RGB.jpeg")
+                
+        #         im.save(name_dest_im)
                 
 
         pred_disps = np.concatenate(pred_disps)
@@ -395,6 +388,10 @@ if __name__ == "__main__":
     else:
         opt = options.parser.parse_args()
     writers["vis"] = SummaryWriter(os.path.join(opt.log_dir, "vis"))
-    evaluate(opt)
+    
+    weight_list = [i for i in range(25)]
+    for i in weight_list:
+        opt.load_weights_folder = f"/mnt/RG/SfMNeXt-Impl/boost/resnet50_boost_RE_early/models/weights_{i}"
+        evaluate(opt)
     # evaluate(options.parse())
 

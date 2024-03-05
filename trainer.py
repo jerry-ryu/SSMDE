@@ -62,7 +62,7 @@ class Trainer:
             # low encoder 
             self.models["encoder_low"] = networks.ResnetEncoderDecoder(num_layers=self.opt.num_layers, num_features=self.opt.num_features, model_dim=self.opt.model_dim)
 
-        if self.opt.load_pretrained_model:
+        if self.opt.load_pretrained_model_encoder:
             # high encoder load weight
             print("-> Loading pretrained high encoder from ", self.opt.load_pt_folder_high)
             encoder_path = os.path.join(self.opt.load_pt_folder_high, "encoder.pth")
@@ -95,12 +95,8 @@ class Trainer:
             # high depth
             self.models["depth_high"] = networks.Lite_Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size_high, dim_out=self.opt.dim_out_high, embedding_dim=self.opt.model_dim, 
                                                                     query_nums=self.opt.query_nums_high, num_heads=4, min_val=self.opt.min_depth, max_val=self.opt.max_depth)
-            #low depth
-            self.models["depth_low"] = networks.Lite_Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size_low, dim_out=self.opt.dim_out_low, embedding_dim=self.opt.model_dim, 
-                                                                    query_nums=self.opt.query_nums_low, num_heads=4, min_val=self.opt.min_depth, max_val=self.opt.max_depth)
 
-
-        if self.opt.load_pretrained_model:
+        if self.opt.load_pretrained_model_depth:
             # high depth load weight
             print("-> Loading pretrained high depth decoder from ", self.opt.load_pt_folder_high)
             depth_decoder_path = os.path.join(self.opt.load_pt_folder_high, "depth.pth")
@@ -108,25 +104,13 @@ class Trainer:
             filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.models["depth_high"].state_dict()}
             self.models["depth_high"].load_state_dict(filtered_dict_enc)
             
-            # low depth load weight
-            print("-> Loading pretrained low depth decoder from ", self.opt.load_pt_folder_low)
-            depth_decoder_path = os.path.join(self.opt.load_pt_folder_low, "depth.pth")
-            loaded_dict_enc = torch.load(depth_decoder_path, map_location=self.device)
-            filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.models["depth_low"].state_dict()}
-            self.models["depth_low"].load_state_dict(filtered_dict_enc)
-            
 
         self.models["depth_high"] = self.models["depth_high"].cuda()
         self.models["depth_high"] = torch.nn.DataParallel(self.models["depth_high"])
-        for param in self.models["depth_high"].parameters():
-            param.requires_grad = False
-            
-        self.models["depth_low"] = self.models["depth_low"].cuda()
-        self.models["depth_low"] = torch.nn.DataParallel(self.models["depth_low"])
-        for param in self.models["depth_low"].parameters():
-            param.requires_grad = False
+        # for param in self.models["depth_high"].parameters():
+        #     param.requires_grad = False
         
-        # self.parameters_to_train += list(self.models["depth"].parameters())
+        self.parameters_to_train += list(self.models["depth_high"].parameters())
 
 
         self.models["pose"] = networks.PoseCNN(
@@ -143,7 +127,7 @@ class Trainer:
             param.requires_grad = False
         
         # self.models["merge"] = merge_net.Pix2Pix4DepthModel()
-        self.models["merge"] = unet.UNet(2,1)
+        self.models["merge"] = unet.UNet(64,32).cuda()
         self.models["merge"] = torch.nn.DataParallel(self.models["merge"]) 
         self.parameters_to_train += list(self.models["merge"].parameters())
             
@@ -280,18 +264,6 @@ class Trainer:
                 self.val()
 
             self.step += 1    
-    
-    def normalize(self, depth_map):
-        ma = self.opt.max_depth
-        mi = self.opt.min_depth
-        d = ma - mi if ma != mi else 1e5
-        return (depth_map - mi) / d
-        
-    def denormalize(self, depth_map):
-        ma = self.opt.max_depth
-        mi = self.opt.min_depth
-        d = ma - mi if ma != mi else 1e5
-        return  mi + (depth_map * d) 
         
     
     def process_batch(self, inputs):
@@ -317,24 +289,15 @@ class Trainer:
             features_high = self.models["encoder_high"](inputs["color_aug", 0, 0])
             features_low = self.models["encoder_low"](inputs["color_low_aug", 0, 0])
 
+            _, _, features_h, features_w = features_high.size()
+            features_low = torch.nn.functional.interpolate(features_low,(features_h,features_w),mode='bilinear',align_corners=False) 
+            outputs_merged = torch.cat((features_high,features_low), 1)
+            features_merged = self.models["merge"](outputs_merged)            
 
-            outputs_high = self.models["depth_high"](features_high)["disp", 0]
-            outputs_low = self.models["depth_low"](features_low)["disp", 0]
+            outputs_high = self.models["depth_high"](features_merged)["disp", 0]
             
             outputs = {}
-            
-            outputs["high_disp",0] = outputs_high
-            outputs["low_disp",0] = outputs_low
-            
-            outputs_low = torch.nn.functional.interpolate(outputs_low,(self.opt.high_height // 2,self.opt.high_width // 2),mode='bilinear',align_corners=False) 
-            
-            outputs_high = self.normalize(outputs_high)
-            outputs_low = self.normalize(outputs_low)
-            
-            outputs_merge = torch.cat((outputs_high,outputs_low), 1)
-            output_merged  = self.models["merge"](outputs_merge)
-            output_merged = self.denormalize(output_merged)
-            outputs["disp", 0] = output_merged
+            outputs["disp",0] = outputs_high
             
             # outputs_high = outputs_high["disp", 0]
             # outputs_low = torch.nn.functional.interpolate(outputs_low["disp", 0],(self.opt.high_height // 2, self.opt.high_width // 2),mode='bilinear',align_corners=False)
@@ -649,12 +612,12 @@ class Trainer:
         """
         f = open("/mnt/RG/SfMNeXt-Impl/abc.txt", "a")
         print(f"<{self.step}>", file =f)
-        print("high_max",torch.max(outputs["high_disp",0]).item(),"high_95",torch.quantile(outputs["high_disp",0].flatten(), 0.95).item(),\
-            "high_75",torch.quantile(outputs["high_disp",0].flatten(), 0.75).item(), "high_50",torch.quantile(outputs["high_disp",0].flatten(), 0.50).item(),\
-                "high_min",torch.min(outputs["high_disp",0]).item(),file =f)
-        print("low_max",torch.max(outputs["low_disp",0]).item(),"low_95",torch.quantile(outputs["low_disp",0].flatten(), 0.95).item(),\
-            "low_75",torch.quantile(outputs["low_disp",0].flatten(), 0.75).item(), "low_50",torch.quantile(outputs["low_disp",0].flatten(), 0.50).item(), \
-                "low_min",torch.min(outputs["low_disp",0]).item(),file =f)
+        # print("high_max",torch.max(outputs["high_disp",0]).item(),"high_95",torch.quantile(outputs["high_disp",0].flatten(), 0.95).item(),\
+        #     "high_75",torch.quantile(outputs["high_disp",0].flatten(), 0.75).item(), "high_50",torch.quantile(outputs["high_disp",0].flatten(), 0.50).item(),\
+        #         "high_min",torch.min(outputs["high_disp",0]).item(),file =f)
+        # print("low_max",torch.max(outputs["low_disp",0]).item(),"low_95",torch.quantile(outputs["low_disp",0].flatten(), 0.95).item(),\
+        #     "low_75",torch.quantile(outputs["low_disp",0].flatten(), 0.75).item(), "low_50",torch.quantile(outputs["low_disp",0].flatten(), 0.50).item(), \
+        #         "low_min",torch.min(outputs["low_disp",0]).item(),file =f)
         print("merged_max",torch.max(outputs["disp", 0]).item(),"merged_95",torch.quantile(outputs["disp",0].flatten(), 0.95).item(),\
             "merged_75",torch.quantile(outputs["disp",0].flatten(), 0.75).item(), "merged_50",torch.quantile(outputs["disp",0].flatten(), 0.50).item(), \
                 "merged_min",torch.min(outputs["disp",0]).item(),file =f)
@@ -679,13 +642,13 @@ class Trainer:
                     "disp_{}/{}".format(s, j),
                     normalize_image(outputs[("disp", s)][j]), self.step)
                 
-                writer.add_image(
-                    "disp_high_{}/{}".format(s, j),
-                    normalize_image(outputs[("high_disp", s)][j]), self.step)
+                # writer.add_image(
+                #     "disp_high_{}/{}".format(s, j),
+                #     normalize_image(outputs[("high_disp", s)][j]), self.step)
                 
-                writer.add_image(
-                    "disp_low_{}/{}".format(s, j),
-                    normalize_image(outputs[("low_disp", s)][j]), self.step)
+                # writer.add_image(
+                #     "disp_low_{}/{}".format(s, j),
+                #     normalize_image(outputs[("low_disp", s)][j]), self.step)
 
                 if self.opt.predictive_mask:
                     for f_idx, frame_id in enumerate(self.opt.frame_ids[1:]):

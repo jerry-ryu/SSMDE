@@ -213,9 +213,13 @@ class MonodepthOptions:
         self.parser.add_argument("--load_adam",
                                  help="if set, uses load adam state for training",
                                  action="store_true")
+        # load_pretrained_model (encoder)
+        self.parser.add_argument("--load_pretrained_model_encoder",
+                                 help="if set, uses pretrained encoder for training",
+                                 action="store_true")
         # load_pretrained_model (encoder, depth)
-        self.parser.add_argument("--load_pretrained_model",
-                                 help="if set, uses pretrained encoder and depth decoder for training",
+        self.parser.add_argument("--load_pretrained_model_depth",
+                                 help="if set, uses pretrained depth decoder for training",
                                  action="store_true")
         self.parser.add_argument("--load_pt_folder_high",
                                  type=str,
@@ -303,7 +307,7 @@ class MonodepthOptions:
         self.parser.add_argument("--num_workers",
                                  type=int,
                                  help="number of dataloader workers",
-                                 default=2)
+                                 default=5)
 
         # LOADING options
         self.parser.add_argument("--pred_metric_depth",
