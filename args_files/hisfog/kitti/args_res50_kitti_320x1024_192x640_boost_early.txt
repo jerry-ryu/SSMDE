@@ -1,0 +1,35 @@
+--data_path /mnt/RG/dataset/kitti_data
+--dataset kitti
+--eval_split eigen_benchmark
+
+--high_height 320
+--high_width 1024
+
+--low_height 192
+--low_width 640
+
+--batch_size 12
+--num_epochs 25
+--model_dim 32
+--num_layers 50
+--num_features 256
+
+--patch_size_high 20
+--query_nums_high 128
+--dim_out_high 128
+
+--scheduler_step_size 15
+--use_stereo
+--eval_mono
+--post_process
+--min_depth 0.001
+--max_depth 80.0
+--backbone resnet_lite
+
+--load_weights_folder /mnt/RG/SfMNeXt-Impl/boost/resnet50_boost_RE_early/models/weights_24
+
+--pretrained_pose
+--pose_net_path /mnt/RG/SfMNeXt-Impl/checkpoints/pose
+
+--log_dir /mnt/RG/SfMNeXt-Impl/boost
+--model_name resnet50_boost_RE
