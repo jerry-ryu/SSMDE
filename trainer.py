@@ -29,6 +29,7 @@ experiment_name="Mono"
 
 class Trainer:
     def __init__(self, options):
+        print("hoho")
         self.opt = options
         self.log_path = os.path.join(self.opt.log_dir, self.opt.model_name)
 
@@ -70,10 +71,10 @@ class Trainer:
             filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.models["encoder"].state_dict()}
             self.models["encoder"].load_state_dict(filtered_dict_enc)
 
-        self.models["encoder"] = self.models["encoder"].cuda()
-        self.models["encoder"] = torch.nn.DataParallel(self.models["encoder"]) 
+        # self.models["encoder"] = self.models["encoder"].cuda()
+        # self.models["encoder"] = torch.nn.DataParallel(self.models["encoder"]) 
         # self.models["encoder"].to(self.device)
-        self.parameters_to_train += list(self.models["encoder"].parameters())
+        # self.parameters_to_train += list(self.models["encoder"].parameters())
 
         if self.opt.backbone.endswith("_lite"):
             self.models["depth"] = networks.Lite_Depth_Decoder_QueryTr(in_channels=self.opt.model_dim, patch_size=self.opt.patch_size, dim_out=self.opt.dim_out, embedding_dim=self.opt.model_dim, 
@@ -89,10 +90,10 @@ class Trainer:
             filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.models["depth"].state_dict()}
             self.models["depth"].load_state_dict(filtered_dict_enc)
 
-        self.models["depth"] = self.models["depth"].cuda()
-        self.models["depth"] = torch.nn.DataParallel(self.models["depth"])
+        # self.models["depth"] = self.models["depth"].cuda()
+        # self.models["depth"] = torch.nn.DataParallel(self.models["depth"])
         # self.models["depth"].to(self.device)
-        self.parameters_to_train += list(self.models["depth"].parameters())
+        # self.parameters_to_train += list(self.models["depth"].parameters())
 
 
         self.models["pose"] = networks.PoseCNN(
@@ -104,14 +105,14 @@ class Trainer:
             self.models["pose"].load_state_dict(state_dict)
 
         # self.models["pose"].to(self.device)
-        self.models["pose"] = self.models["pose"].cuda()
-        # self.models["pose"] = torch.nn.DataParallel(self.models["pose"])
-        if self.opt.diff_lr :
-            print("using diff lr for depth-net and pose-net")
-            self.pose_params = []
-            self.pose_params += list(self.models["pose"].parameters())
-        else :
-            self.parameters_to_train += list(self.models["pose"].parameters())
+        # self.models["pose"] = self.models["pose"].cuda()
+        # # self.models["pose"] = torch.nn.DataParallel(self.models["pose"])
+        # if self.opt.diff_lr :
+        #     print("using diff lr for depth-net and pose-net")
+        #     self.pose_params = []
+        #     self.pose_params += list(self.models["pose"].parameters())
+        # else :
+        #     self.parameters_to_train += list(self.models["pose"].parameters())
 
         # if self.opt.predictive_mask:
         #     assert self.opt.disable_automasking, \
@@ -125,6 +126,39 @@ class Trainer:
         #     self.models["predictive_mask"].to(self.device)
         #     self.parameters_to_train += list(self.models["predictive_mask"].parameters())
 
+        
+        for key, model in self.models.items():
+            if self.opt.distributed:
+                # if self.opt.gpu is not None:
+                model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+                local_rank = int(os.environ["LOCAL_RANK"])
+                model.cuda()
+                self.opt.batch_size = int(self.opt.batch_size / self.opt.ngpus_per_node)
+                self.opt.num_workers = int((self.opt.num_workers+self.opt.ngpus_per_node-1)/self.opt.ngpus_per_node)
+                model = torch.nn.parallel.DistributedDataParallel(model,device_ids=[local_rank])
+                # else:
+                #     model.cuda()
+                #     model = torch.nn.parallel.DistributedDataParallel(model)
+                
+                if self.opt.diff_lr and key == "pose" :
+                    print("using diff lr for depth-net and pose-net")
+                    self.pose_params = []
+                    self.pose_params += list(model.parameters())
+                else:
+                    self.parameters_to_train += list(model.parameters())
+            else:
+                model = model.cuda()
+                model = torch.nn.DataParallel(model)
+                model.to(self.device)
+                
+                if self.opt.diff_lr and key == "pose" :
+                    print("using diff lr for depth-net and pose-net")
+                    self.pose_params = []
+                    self.pose_params += list(model.parameters())
+                else:
+                    self.parameters_to_train += list(model.parameters())   
+                
+                    
         if self.opt.diff_lr :
             df_params = [{"params": self.pose_params, "lr": self.opt.learning_rate / 10},
                       {"params": self.parameters_to_train, "lr": self.opt.learning_rate}]
@@ -159,9 +193,15 @@ class Trainer:
         train_dataset = self.dataset(
             self.opt.data_path, train_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 1, is_train=True, img_ext=img_ext) # num_scales = 1
+        
+        if self.opt.distributed:
+            self.train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, shuffle = True)
+        else:
+            self.train_sampler = None
+            
         self.train_loader = DataLoader(
-            train_dataset, self.opt.batch_size, True,
-            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True)
+            train_dataset, batch_size = self.opt.batch_size, shuffle = (self.train_sampler is None),
+            num_workers=self.opt.num_workers, pin_memory=True, drop_last=True, sampler = self.train_sampler)
         val_dataset = self.dataset(
             self.opt.data_path, val_filenames, self.opt.height, self.opt.width,
             self.opt.frame_ids, 1, is_train=False, img_ext=img_ext) # num_scales = 1
@@ -212,18 +252,23 @@ class Trainer:
     def train(self):
         """Run the entire training pipeline
         """
+        print("hoho")
         self.epoch = 0
         self.step = 0
         self.start_time = time.time()
         # run_id = f"{dt.now().strftime('%d-%h_%H-%M')}-nodebs{self.opt.batch_size}-tep{self.epoch}-lr{self.opt.learning_rate}--{uuid.uuid4()}"
         # name = f"{experiment_name}_{run_id}"
         # wandb.init(project=PROJECT, name=name, config=self.opt, dir='.')
-        self.save_model()
+        if torch.distributed.get_rank()==0:
+            self.save_model()
         for self.epoch in range(self.opt.num_epochs):
+            if self.opt.distributed:
+                self.train_sampler.set_epoch(self.epoch)
             self.run_epoch()
             self.model_lr_scheduler.step()
             if (self.epoch + 1) % self.opt.save_frequency == 0:
-                self.save_model()
+                if torch.distributed.get_rank()==0:
+                    self.save_model()
 
     def run_epoch(self):
         """Run a single epoch of training and validation
@@ -648,7 +693,7 @@ class Trainer:
             if model_name == 'pose':
                to_save = model.state_dict()
             else:
-                to_save = model.module.state_dict()
+                to_save = model.state_dict()
             if model_name == 'encoder':
                 # save the sizes - these are needed at prediction time
                 to_save['height'] = self.opt.height

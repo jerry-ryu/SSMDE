@@ -269,7 +269,7 @@ class MonodepthOptions:
         self.parser.add_argument("--num_workers",
                                  type=int,
                                  help="number of dataloader workers",
-                                 default=4)
+                                 default=8)
 
         # LOADING options
         self.parser.add_argument("--pred_metric_depth",
@@ -336,6 +336,11 @@ class MonodepthOptions:
                                  help="if set will output the disparities to this folder",
                                  type=str)
         self.parser.add_argument("--post_process",
+                                 help="if set will perform the flipping post processing "
+                                      "from the original monodepth paper",
+                                 action="store_true")
+        
+        self.parser.add_argument("--distributed",
                                  help="if set will perform the flipping post processing "
                                       "from the original monodepth paper",
                                  action="store_true")
