@@ -110,6 +110,10 @@ class Unet(nn.Module):
                 f"Existing models should be selected " 
                 f"from pretrained_backbones_unet import __available_models__"
             )
+        if backbone == "convnext_large":
+            print("set_pretrained")
+            pretrained = False
+            backbone_kwargs = {"checkpoint_path": "/mnt/RG/SfMNeXt-Impl/checkpoints/ConvNeXt/convnext_large_22k_1k_224.pth"}
 
         encoder = create_model(
             backbone, features_only=True, out_indices=backbone_indices, 
