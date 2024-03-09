@@ -1,9 +1,9 @@
 --data_path /mnt/RG/dataset/kitti_data
 --log_dir /mnt/RG/SfMNeXt-Impl/boost
---model_name cvnXt_high
+--model_name cvnXt_high_re
 --dataset kitti 
 --eval_split eigen
---backbone convnext_large
+--backbone convnext_large_in22ft1k
 --height 320 
 --width 1024
 --batch_size 8

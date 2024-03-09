@@ -1,16 +1,16 @@
 --data_path /mnt/RG/dataset/kitti_data
 --log_dir /mnt/RG/SfMNeXt-Impl/boost
---model_name cvnXt_high
+--model_name cvnXt_low
 --dataset kitti 
 --eval_split eigen
 --backbone convnext_large
---height 320 
---width 1024
---batch_size 8
+--height 192
+--width 640
+--batch_size 16
 --num_epochs 20
 --scheduler_step_size 10
 --model_dim 32
---patch_size 32
+--patch_size 16
 --dim_out 64
 --query_nums 64
 --dec_channels 1024 512 256 128
@@ -18,8 +18,9 @@
 --max_depth 80.0
 --diff_lr
 --use_stereo
---load_weights_folder /mnt/RG/SfMNeXt-Impl/boost/cvnXt_low/models/weights_0
+--load_weights_folder /mnt/bn/wyh-ytb-videos/pt_weights/SQL_weights/cvnXt_weights/cvnXt_075
 --eval_mono
 --post_process
 --pretrained_pose
 --pose_net_path /mnt/RG/SfMNeXt-Impl/checkpoints/pose
+--distributed
