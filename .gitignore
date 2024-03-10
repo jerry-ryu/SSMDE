@@ -8,3 +8,4 @@ wandb
 __pycache__/
 /sample
 *.npz
+/a_weights_lite_mono
